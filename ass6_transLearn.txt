@@ -1,0 +1,158 @@
+import tensorflow_datasets as tfds
+import tensorflow as tf
+from tensorflow.keras.utils import to_categorical
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+
+from tensorflow.keras.applications.vgg16 import VGG16
+from tensorflow.keras.applications.vgg16 import preprocess_input
+
+###################
+
+# Loading images and labels
+(train_ds, train_labels), (test_ds, test_labels) = tfds.load("tf_flowers",
+    split=["train[:70%]", "train[:30%]"], ## Train test split
+    batch_size=-1,
+    as_supervised=True,  # Include labels
+)
+
+train_ds[0].shape      # Size of each img
+
+#####################
+
+# Resizing images ( 150x150 px )
+train_ds = tf.image.resize(train_ds, (150, 150))
+test_ds = tf.image.resize(test_ds, (150, 150))
+train_labels  # print labels given for train dataset
+
+######################
+test_labels  # print labels given for test dataset
+#####################
+
+## Transforming labels to correct format
+train_labels = to_categorical(train_labels, num_classes=5)
+test_labels = to_categorical(test_labels, num_classes=5)
+
+train_labels[0]
+# dandelion - 0
+#
+# tulips - 2
+# sunflowers - 3
+# roses - 4
+
+##################
+
+## load a pretrained CNN model
+train_ds[0].shape
+
+## Loading VGG16 model - imagenet dataset , not include FC 6,7,8
+base_model = VGG16(weights="imagenet", include_top=False, input_shape=train_ds[0].shape)
+
+###############
+
+## will not train base mode Convo & pool (Non- trainable layers)
+base_model.trainable = False 
+
+## Preprocessing input
+train_ds = preprocess_input(train_ds) 
+test_ds = preprocess_input(test_ds)
+
+## model details
+base_model.summary()
+
+###################
+
+# add our layers on top of this model for our task replcing FC 6,7,8
+from tensorflow.keras import layers, models
+
+flatten_layer = layers.Flatten()
+dense_layer_1 = layers.Dense(50, activation='relu')
+dense_layer_2 = layers.Dense(20, activation='relu')
+prediction_layer = layers.Dense(5, activation='softmax')
+
+# base model (all conv & pool) + replced FC layer
+model = models.Sequential([
+    base_model,
+    flatten_layer,
+    dense_layer_1,
+    dense_layer_2,
+    prediction_layer
+])
+
+from tensorflow.keras.callbacks import EarlyStopping
+
+model.compile(
+    optimizer='adam',
+    loss='categorical_crossentropy',
+    metrics=['accuracy'],
+)
+
+# EarlyStopping based on max accuracy
+es = EarlyStopping(monitor='val_accuracy', mode='max', patience=5,  restore_best_weights=True)
+
+history=model.fit(train_ds, train_labels, epochs=50, validation_split=0.2, batch_size=32, callbacks=[es])  # 20% test 80% train
+
+####################
+
+los,accurac=model.evaluate(test_ds,test_labels)
+print("Loss: ",los,"Accuracy: ", accurac)
+
+##################
+
+import matplotlib.pyplot as plt
+plt.plot(history.history['accuracy'])
+plt.title('ACCURACY')
+plt.ylabel('accuracy')
+plt.xlabel('epoch')
+plt.legend(['train'],loc='upper left')
+plt.show()
+
+##################
+
+import numpy as np
+import pandas as pd
+y_pred = model.predict(test_ds)
+y_classes = [np.argmax(element) for element in y_pred]
+#to_categorical(y_classes, num_classes=5)
+#to_categorical(test_labels, num_classes=5)
+print(y_classes[:10])
+print("\nTest")
+print(test_labels[:10])
+
+##################
+
+import random
+
+# Flower names corresponding to labels
+class_names = ['dandelion', 'Daisy', 'tulips', 'sunflowers', 'roses']
+
+# Function to show image and classify it
+def test_random_image(model, test_images, test_labels):
+    # Select a random image
+    random_index = np.random.randint(0, test_images.shape[0])
+    random_image = test_images[random_index]
+    random_label = test_labels[random_index].numpy()
+
+    # Display the image
+    plt.imshow(random_image / 255.0)
+    plt.axis('off')
+    plt.show()
+
+    # Preprocess image and make prediction
+    image_batch = np.expand_dims(random_image, axis=0)  # Add batch dimension
+    predictions = model.predict(image_batch)
+    predicted_probabilities = predictions[0]
+
+    # Print the predicted probabilities for each flower
+    for i, class_name in enumerate(class_names):
+        print(f"{class_name}: {predicted_probabilities[i] * 100:.2f}%")
+
+    # Find the class with the highest probability
+    predicted_class = np.argmax(predicted_probabilities)
+    predicted_flower = class_names[predicted_class]
+
+    print(f"\nThe model predicts this flower is: {predicted_flower}")
+
+# Testing the model on a random image from the test dataset
+test_random_image(model, test_ds, test_labels)
